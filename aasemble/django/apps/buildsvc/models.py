@@ -60,15 +60,15 @@ class RepreproDriver(RepositoryDriver):
         LOG.info('Generating key for %s' % (self.repository))
         gpg_input = render_to_string('buildsvc/gpg-keygen-input.tmpl',
                                      {'repository': self.repository})
-        output = run_cmd(['gpg', '--batch', '--gen-key'], input=gpg_input)
-
+        env = {'GNUPGHOME': self.repository.gpghome()}
+        output = run_cmd(['gpg', '--batch', '--gen-key'], input=gpg_input, override_env=env)
         for l in output.split('\n'):
             if l.startswith('gpg: key '):
                 return l.split(' ')[2]
 
     def key_data(self):
         if self.repository.key_id:
-            env = {'GNUPG_HOME': self.repository.gpghome()}
+            env = {'GNUPGHOME': self.repository.gpghome()}
             return run_cmd(['gpg', '-a', '--export', self.repository.key_id], override_env=env)
 
 
@@ -109,7 +109,8 @@ class Repository(models.Model):
     def ensure_key(self):
         if not self.key_id:
             self.key_id = get_repo_driver(self).generate_key()
-            self.save()
+            self.key_data = self._key_data()
+            self._save()
 
     def first_series(self):
         try:
@@ -143,7 +144,7 @@ class Repository(models.Model):
                          self.basedir, {'repository': self})
 
     def _reprepro(self, *args):
-        env = {'GNUPG_HOME': self.gpghome()}
+        env = {'GNUPGHOME': self.gpghome()}
         return run_cmd(['reprepro', '-b', self.basedir, '--waitforlock=10'] + list(args),
                        override_env=env)
 
@@ -171,6 +172,9 @@ class Repository(models.Model):
         remove_ddebs_from_changes(changes_file)
         self._reprepro('--ignore=wrongdistribution', 'include', series_name, changes_file)
         self.export()
+
+    def _save(self, *args, **kwargs):
+        super(Repository, self).save(*args, **kwargs)
 
     def save(self, *args, **kwargs):
         super(Repository, self).save(*args, **kwargs)
